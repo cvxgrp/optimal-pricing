@@ -33,89 +33,181 @@ class PricingResult:
     policy_parameters: np.ndarray = None
    
     
-def _profit(profit_data: ProfitData, pi_value: np.ndarray) -> float:
-    """TODO: Add docstring."""
-    return profit_data.r_nom @ np.exp(profit_data.elasticity @ pi_value + pi_value) \
-            - profit_data.kappa_nom @ np.exp(profit_data.elasticity @ pi_value)
-    
-    
-def _qmm(profit_data: ProfitData, constraint_data: ConstraintData,
-         cvxpy_constraints: List, pi: cp.Variable, delta: cp.Variable,
-         theta: cp.Variable=None, tol: float=1e-3) -> PricingResult:
-    """TODO: Add docstring."""
-    
-    n = len(profit_data.r_nom)
-    rscaled = cp.CallbackParam(lambda: profit_data.r_nom * np.exp(profit_data.elasticity @ pi.value + pi.value), n)
-    alpha = cp.Parameter(n)
+def _profit(profit_data: ProfitData, pi: np.ndarray) -> float:
+    """Calculate profit for given prices.
 
-    knom_slope = cp.CallbackParam(lambda: profit_data.kappa_nom * np.exp(delta.value) * (1 - alpha.value * delta.value), n)
-    knom_curv = cp.CallbackParam(lambda: profit_data.kappa_nom * np.exp(delta.value) * alpha.value / 2, n, nonneg=True)
+    Args:
+        profit_data (ProfitData): nominal revenue, nominal cost, and elasticity.
+        pi (np.ndarray): Log-price changes.
 
-    obj = rscaled @ (delta + pi) - knom_slope @ delta - knom_curv @ delta**2
+    Returns:
+        float: Profit value.
+    """
+    delta = profit_data.elasticity @ pi
+    return profit_data.r_nom @ np.exp(delta + pi) - profit_data.kappa_nom @ np.exp(delta)
+    
+    
+def _qmm(
+    n: int,
+    profit_data: ProfitData, constraint_data: ConstraintData,
+    cvxpy_constraints: List[cp.Constraint],
+    pi: cp.Variable, delta: cp.Variable, theta: cp.Variable=None,
+    tol: float=1e-3, maxiter: int=100
+) -> PricingResult:
+    """Run quadratic minorization maximization.
+
+    Args:
+        n (int): Number of products.
+        profit_data (ProfitData): nominal revenue, nominal cost, and elasticity.
+        constraint_data (ConstraintData): Data containing bounds and linear constraints.
+        cvxpy_constraints (List[cp.Constraint]): List of CVXPY constraints.
+        pi (cp.Variable): CVXPY Variable for log-price changes (shape (n,)).
+        delta (cp.Variable): CVXPY Variable for log-demand changes (shape (n,)).
+        theta (cp.Variable | None): Optional CVXPY Variable for policy parameters.
+        tol (float): Relative improvement tolerance for convergence.
+        maxiter (int): Maximum number of quadratic program solves.
+
+    Returns:
+        PricingResult: Final profit, price changes, demand changes and policy parameters.
+    """
+        
+    elasticity = profit_data.elasticity.toarray()
+    delta_max = np.maximum(elasticity, 0) @ constraint_data.pi_max \
+        - np.maximum(-elasticity, 0) @ constraint_data.pi_min
+    
+    def _get_alpha():
+        b = delta_max - delta.value
+        return 2 * (np.exp(b) - b - 1) / (b ** 2)
+    
+    def _get_rscaled():
+        return profit_data.r_nom * np.exp(elasticity @ pi.value + pi.value)
+    
+    def _get_knom_slope():
+        return profit_data.kappa_nom * np.exp(delta.value) * (1 - alpha.value * delta.value)
+    
+    def _get_knom_curv():
+        return profit_data.kappa_nom * np.exp(delta.value) * alpha.value / 2
+    
+    alpha = cp.CallbackParam(_get_alpha, n, nonneg=True)
+    rscaled = cp.CallbackParam(_get_rscaled, n)
+    knom_slope = cp.CallbackParam(_get_knom_slope, n)
+    knom_curv = cp.CallbackParam(_get_knom_curv, n, nonneg=True)
+
+    obj = rscaled @ (delta + pi) - knom_slope @ delta - knom_curv @ delta ** 2
     qp = cp.Problem(cp.Maximize(obj), cvxpy_constraints)
     
-    delta_max = np.maximum(profit_data.elasticity.toarray(), 0) @ constraint_data.pi_max \
-                - np.maximum(-profit_data.elasticity.toarray(), 0) @ constraint_data.pi_min
-    
-    def _get_alpha(delta_val):
-        b = delta_max - delta_val
-        return 2 * (np.exp(b) - b - 1) / (b ** 2)
-
     profits = [_profit(profit_data, np.zeros(n))]
-
     pi.value = np.zeros(n)
     delta.value = np.zeros(n)
-    while True:
-        alpha.value = _get_alpha(delta.value)
-        qp.solve(solver=cp.OSQP, verbose=False)
+    for _ in range(maxiter):
+        qp.solve(solver=cp.OSQP, warm_start=True)
         profits.append(_profit(profit_data, pi.value))
         if profits[-1] / profits[-2] - 1 < tol: break
         
-    return PricingResult(profit=profits[-1], price_changes=np.exp(pi.value), demand_changes=np.exp(delta.value),
-                         policy_parameters=theta.value if theta is not None else None)
+    return PricingResult(
+        profit=profits[-1],
+        price_changes=np.exp(pi.value),
+        demand_changes=np.exp(delta.value),
+        policy_parameters=theta.value if theta is not None else None
+    )
 
 
-def _ccp(profit_data: ProfitData, cvxpy_constraints: List, pi: cp.Variable, delta: cp.Variable,
-         theta: cp.Variable=None, tol: float=1e-3) -> PricingResult:
-    """TODO: Add docstring."""
+def _ccp(
+    n: int,
+    profit_data: ProfitData,
+    cvxpy_constraints: List[cp.Constraint],
+    pi: cp.Variable, delta: cp.Variable, theta: cp.Variable=None,
+    tol: float=1e-3, maxiter: int=100
+) -> PricingResult:
+    """Run convex-concave procedure.
+
+    Args:
+        n (int): number of products.
+        profit_data (ProfitData): nominal revenue, nominal cost, and elasticity.
+        cvxpy_constraints (List[cp.Constraint]): list of constraints.
+        pi (cp.Variable): CVXPY Variable for log-price changes.
+        delta (cp.Variable): CVXPY Variable for log-demand changes.
+        theta (cp.Variable | None): optional CVXPY Variable for policy parameters.
+        tol (float): relative improvement tolerance for convergence.
+        maxiter (int): maximum number of convex problem solves.
+
+    Returns:
+        PricingResult: Final profit, price changes, demand changes, and policy parameters.
+    """
     
-    n = len(profit_data.r_nom)
-    rscaled = cp.CallbackParam(lambda: profit_data.r_nom * np.exp(profit_data.elasticity @ pi.value + pi.value), n)
-
+    def _get_rscaled():
+        return profit_data.r_nom * np.exp(profit_data.elasticity @ pi.value + pi.value)
+        
+    rscaled = cp.CallbackParam(_get_rscaled, n)
     obj = rscaled @ (delta + pi) - profit_data.kappa_nom @ cp.exp(delta)
     prob = cp.Problem(cp.Maximize(obj), cvxpy_constraints)
 
     profits = [_profit(profit_data, np.zeros(n))]
     pi.value = np.zeros(n)
-    while True:
+    for _ in range(maxiter):
         prob.solve(solver=cp.SCS, verbose=False, warm_start=True)
         profits.append(_profit(profit_data, pi.value))
         if profits[-1] / profits[-2] - 1 < tol: break
         
-    return PricingResult(profit=profits[-1], price_changes=np.exp(pi.value), demand_changes=np.exp(delta.value),
-                         policy_parameters=theta.value if theta is not None else None)
+    return PricingResult(
+        profit=profits[-1],
+        price_changes=np.exp(pi.value),
+        demand_changes=np.exp(delta.value),
+        policy_parameters=theta.value if theta is not None else None
+    )
 
 
-def _nlp(profit_data: ProfitData, cvxpy_constraints: List, pi: cp.Variable, delta: cp.Variable,
-         theta: cp.Variable=None, tol: float=1e-3) -> PricingResult:
-    """TODO: Add docstring."""
-    
-    n = len(profit_data.r_nom)
+def _nlp(
+    n: int,
+    profit_data: ProfitData,
+    cvxpy_constraints: List[cp.Constraint],
+    pi: cp.Variable, delta: cp.Variable, theta: cp.Variable=None,
+    tol: float=1e-3
+) -> PricingResult:
+    """Run nonlinear programming solver.
+
+    Args:
+        n (int): Number of products.
+        profit_data (ProfitData): nominal revenue, nominal cost, and elasticity.
+        cvxpy_constraints (List[cp.Constraint]): list of constraints.
+        pi (cp.Variable): CVXPY Variable for log-price changes.
+        delta (cp.Variable): CVXPY Variable for log-demand changes.
+        theta (cp.Variable | None): Optional CVXPY Variable for policy parameters.
+        tol (float): Relative tolerance for the NLP solver.
+
+    Returns:
+        PricingResult: Final profit, price changes, demand changes, and policy parameters.
+    """
+        
     obj = profit_data.r_nom @ cp.exp(delta + pi) - profit_data.kappa_nom @ cp.exp(delta)
     nlp = cp.Problem(cp.Maximize(obj), cvxpy_constraints)
                 
     pi.value = np.zeros(n)
     delta.value = np.zeros(n)
-            
     nlp.solve(solver=cp.IPOPT, nlp=True, verbose=False, derivative_test='none', tol=tol)
     
-    return PricingResult(profit=_profit(profit_data, pi.value),
-                         price_changes=np.exp(pi.value), demand_changes=np.exp(delta.value),
-                         policy_parameters=theta.value if theta is not None else None)
+    return PricingResult(
+        profit=_profit(profit_data, pi.value),
+        price_changes=np.exp(pi.value), demand_changes=np.exp(delta.value),
+        policy_parameters=theta.value if theta is not None else None
+    )
 
 
-def solve_ppp(profit_data: ProfitData, constraint_data: ConstraintData, method: str='QMM', tol: float=1e-3) -> PricingResult:
-    """TODO: Add docstring."""
+def solve_ppp(
+    profit_data: ProfitData, constraint_data: ConstraintData,
+    method: str='QMM', tol: float=1e-3
+) -> PricingResult:
+    """Solve product pricing problem (PPP).
+    
+    Args:
+        profit_data (ProfitData): nominal revenue, nominal cost, and elasticity matrix.
+        constraint_data (ConstraintData): bounds and constraints.
+        method (str): Optimization method to use ('QMM', 'CCP', or 'NLP'; defaults to 'QMM').
+        tol (float): Relative improvement tolerance for termination, defaults to 1e-3.
+
+    Returns:
+        PricingResult: Final profit, price changes, demand changes, and policy parameters.
+    """
     
     n = len(profit_data.r_nom)
     
@@ -137,10 +229,10 @@ def solve_ppp(profit_data: ProfitData, constraint_data: ConstraintData, method: 
         constraints += [constraint_data.F @ pi <= constraint_data.g]
     
     if method == 'QMM':
-        return _qmm(profit_data, constraint_data, constraints, pi, delta, theta, tol)
+        return _qmm(n, profit_data, constraint_data, constraints, pi, delta, theta, tol)
     elif method == 'CCP':
-        return _ccp(profit_data, constraints, pi, delta, theta, tol)
+        return _ccp(n, profit_data, constraints, pi, delta, theta, tol)
     elif method == 'NLP':
-        return _nlp(profit_data, constraints, pi, delta, theta, tol)
+        return _nlp(n, profit_data, constraints, pi, delta, theta, tol)
     else:
         raise ValueError(f"Unknown solve method: {method}")
