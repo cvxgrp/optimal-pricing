@@ -31,7 +31,8 @@ print(result.price_changes)
 To reproduce the figures from the manuscript, run
 
 ```bash
-python figure2.py figure3.py
+python figure2.py
+python figure3.py
 ```
 
 ## Dependencies
