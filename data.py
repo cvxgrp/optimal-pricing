@@ -3,7 +3,7 @@ import numpy as np
 import scipy.sparse as sparse
 from typing import Tuple
 
-from pricing import ProfitData, ConstraintData
+from optimization import ProfitData, ConstraintData
 
 
 def construct_elasticity(n: int) -> sparse.csr_matrix:

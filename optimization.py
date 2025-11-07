@@ -31,6 +31,7 @@ class PricingResult:
     price_changes: np.ndarray
     demand_changes: np.ndarray
     policy_parameters: np.ndarray = None
+    profit_iterations: np.ndarray = None
    
     
 def _profit(profit_data: ProfitData, pi: np.ndarray) -> float:
@@ -106,6 +107,7 @@ def _qmm(
         
     return PricingResult(
         profit=profits[-1],
+        profit_iterations=np.array(profits),
         price_changes=np.exp(pi.value),
         demand_changes=np.exp(delta.value),
         policy_parameters=theta.value if theta is not None else None
@@ -151,6 +153,7 @@ def _ccp(
         
     return PricingResult(
         profit=profits[-1],
+        profit_iterations=np.array(profits),
         price_changes=np.exp(pi.value),
         demand_changes=np.exp(delta.value),
         policy_parameters=theta.value if theta is not None else None
