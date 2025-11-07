@@ -8,7 +8,7 @@ For mathematical background, please refer to our manuscript.
 
 ## Example
 
-Here's a simple example for optimizing 1280 prices with QMM:
+Here's a simple example for optimizing the prices of 1280 products with QMM:
 
 ```python
 from data import generate_data
