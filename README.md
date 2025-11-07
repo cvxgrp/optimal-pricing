@@ -11,6 +11,10 @@ For detailed implementation and mathematical background, please refer to our man
 Here's a simple example for optimizing 1280 prices with QMM:
 
 ```python
+from data import generate_data
+from optimization import solve_ppp
+
+
 # Generate sample data for 1280 products
 profit_data, constraint_data = generate_data(n=1280)
 
