@@ -1,7 +1,7 @@
 # Optimal Product Pricing
 
 This package contains code for solving product pricing problems (PPPs) as described in our
-[note on optimal product pricing](https://stanford.edu/~boyd/papers/optimal_pricing.html), equation (6).
+[note on optimal product pricing](https://stanford.edu/~boyd/papers/optimal_pricing.html), equation (2).
 Three methods for solving a PPP are supported:
 quadratic minorization maximization (QMM), convex concave procedure (CCP), and nonlinear programming (NLP).
 For mathematical background, please refer to our manuscript.
