@@ -75,10 +75,15 @@ def _qmm(
     elasticity = profit_data.elasticity.toarray()
     delta_max = np.maximum(elasticity, 0) @ constraint_data.pi_max \
         - np.maximum(-elasticity, 0) @ constraint_data.pi_min
+    delta_max = np.minimum(delta_max, constraint_data.delta_max)
     
-    def _get_alpha():
+    def _get_beta():
         b = delta_max - delta.value
-        return 2 * (np.exp(b) - b - 1) / (b ** 2)
+        idx_nz = b > 1e-6
+        b_nz = b[idx_nz]
+        beta = np.ones(n) / 2
+        beta[idx_nz] = 2 * (np.exp(b_nz) - b_nz - 1) / (b_nz ** 2)
+        return beta
     
     def _get_rscaled():
         return profit_data.r_nom * np.exp(elasticity @ pi.value + pi.value)
@@ -89,7 +94,7 @@ def _qmm(
     def _get_knom_curv():
         return profit_data.kappa_nom * np.exp(delta.value) * alpha.value / 2
     
-    alpha = cp.CallbackParam(_get_alpha, n, nonneg=True)
+    alpha = cp.CallbackParam(_get_beta, n, nonneg=True)
     rscaled = cp.CallbackParam(_get_rscaled, n)
     knom_slope = cp.CallbackParam(_get_knom_slope, n)
     knom_curv = cp.CallbackParam(_get_knom_curv, n, nonneg=True)
