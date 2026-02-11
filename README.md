@@ -2,7 +2,7 @@
 
 This package contains code for solving product pricing problems (PPPs) as described in our
 [note on optimal product pricing](https://stanford.edu/~boyd/papers/optimal_pricing.html)
-(equation (2)).
+(equation (3)).
 Three methods for solving a PPP are provided:
 quadratic minorization maximization (QMM), convex concave procedure (CCP), and nonlinear programming (NLP).
 For mathematical background, please refer to the [manuscript](https://stanford.edu/~boyd/papers/optimal_pricing.html).
@@ -10,7 +10,7 @@ For mathematical background, please refer to the [manuscript](https://stanford.e
 ## Dependencies
 
 This code depends on the Python packages `CVXPY`, `SciPy`, and `Matplotlib` (for figure generation).
-If you wish to use NLP, please install `CVXPY` from sources from [this fork](https://github.com/cvxgrp/cvxpy-ipopt),
+If you wish to use NLP, please install `CVXPY` from sources from [this fork](https://github.com/cvxgrp/DNLP),
 until CVXPY with support for NLP is released.
 
 ## Example
